@@ -1,0 +1,98 @@
+name: ML CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  test:
+    name: Test ML Model
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Train model
+        run: python src/train.py
+      
+      - name: Evaluate model quality
+        run: python src/evaluate.py
+      
+      - name: Run unit tests
+        run: |
+          python -m pytest tests/ -v --tb=short
+      
+      - name: Save model artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: trained-model
+          path: |
+            models/model.pkl
+            metrics/metrics.json
+          retention-days: 5
+
+  deploy-s3:
+    name: Deploy Model to S3
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      
+      - name: Train model
+        run: python src/train.py
+      
+      - name: Upload to S3
+        env:
+          AWS_ACCESS_KEY_ID: 
+            ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: 
+            ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ap-south-1
+        run: |
+          pip install awscli
+          
+          aws s3 cp models/model.pkl \
+            s3://bhaskar-ml-models-2026/cicd/model.pkl
+          
+          aws s3 cp metrics/metrics.json \
+            s3://bhaskar-ml-models-2026/cicd/metrics.json
+          
+          echo "Model deployed to S3!"
+      
+      - name: Pipeline Summary
+        run: |
+          echo "================================"
+          echo "CI/CD Pipeline Complete!"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "By: ${{ github.actor }}"
+          echo "================================"
+          echo "Tests: PASSED"
+          echo "Model: Deployed to S3!"
+          echo "================================"
